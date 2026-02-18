@@ -1,10 +1,7 @@
 export default async function handler(req, res) {
-    // Only allow POST
     if (req.method !== "POST") {
         return res.status(405).json({ error: "Method not allowed" });
     }
-
-    console.log("Cal.com payload:", JSON.stringify(req.body, null, 2));
 
     const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN;
     const PIPELINE_ID = process.env.PIPEDRIVE_PIPELINE_ID;
@@ -14,17 +11,40 @@ export default async function handler(req, res) {
     try {
         const payload = req.body.payload;
         const attendee = payload?.attendees?.[0];
+        const responses = payload?.responses || {};
 
         if (!attendee) {
             return res.status(400).json({ error: "No attendee found" });
         }
 
+        // Extract fields from Cal.com
         const attendeeName = attendee.name;
         const attendeeEmail = attendee.email;
+        const company = responses.Azienda?.value || "";
+        const role = responses.ruolo?.value || "";
+        const companySize = responses.dimensioni_azienda?.value || "";
+        const website = responses.sito_web?.value || "";
+        const notes = responses.notes?.value || "";
         const eventTitle = payload.title || "Cal.com Booking";
         const startTime = payload.startTime;
+        const meetLink = payload.metadata?.videoCallUrl || "";
 
-        // 1. Search for existing person by email
+        // 1. Create organization if company provided
+        let orgId;
+        if (company) {
+            const orgRes = await fetch(
+                `${PIPEDRIVE_DOMAIN}/organizations?api_token=${PIPEDRIVE_API_TOKEN}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: company }),
+                }
+            );
+            const orgData = await orgRes.json();
+            orgId = orgData.data?.id;
+        }
+
+        // 2. Search for existing person
         const searchRes = await fetch(
             `${PIPEDRIVE_DOMAIN}/persons/search?term=${encodeURIComponent(attendeeEmail)}&api_token=${PIPEDRIVE_API_TOKEN}`
         );
@@ -35,16 +55,18 @@ export default async function handler(req, res) {
         if (searchData.data?.items?.length > 0) {
             personId = searchData.data.items[0].item.id;
         } else {
-            // 2. Create new person
+            const personBody = {
+                name: attendeeName,
+                email: [{ value: attendeeEmail, primary: true }],
+            };
+            if (orgId) personBody.org_id = orgId;
+
             const personRes = await fetch(
                 `${PIPEDRIVE_DOMAIN}/persons?api_token=${PIPEDRIVE_API_TOKEN}`,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        name: attendeeName,
-                        email: [{ value: attendeeEmail, primary: true }],
-                    }),
+                    body: JSON.stringify(personBody),
                 }
             );
             const personData = await personRes.json();
@@ -52,23 +74,47 @@ export default async function handler(req, res) {
         }
 
         // 3. Create deal
+        const dealBody = {
+            title: `${eventTitle} - ${attendeeName}`,
+            person_id: personId,
+            pipeline_id: parseInt(PIPELINE_ID),
+            stage_id: parseInt(STAGE_ID),
+        };
+        if (orgId) dealBody.org_id = orgId;
+
         const dealRes = await fetch(
             `${PIPEDRIVE_DOMAIN}/deals?api_token=${PIPEDRIVE_API_TOKEN}`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    title: `${eventTitle} - ${attendeeName}`,
-                    person_id: personId,
-                    pipeline_id: parseInt(PIPELINE_ID),
-                    stage_id: parseInt(STAGE_ID),
-                }),
+                body: JSON.stringify(dealBody),
             }
         );
         const dealData = await dealRes.json();
 
-        // 4. Add a note with booking details
+        // 4. Add detailed note
         if (dealData.data?.id) {
+            const noteLines = [
+                `<b>📅 Prenotazione via Cal.com</b>`,
+                ``,
+                `<b>Evento:</b> ${eventTitle}`,
+                `<b>Data/Ora:</b> ${startTime}`,
+                meetLink ? `<b>Link Meet:</b> ${meetLink}` : null,
+                ``,
+                `<b>👤 Contatto</b>`,
+                `<b>Nome:</b> ${attendeeName}`,
+                `<b>Email:</b> ${attendeeEmail}`,
+                role ? `<b>Ruolo:</b> ${role}` : null,
+                ``,
+                `<b>🏢 Azienda</b>`,
+                company ? `<b>Azienda:</b> ${company}` : null,
+                companySize ? `<b>Dimensioni:</b> ${companySize}` : null,
+                website ? `<b>Sito Web:</b> ${website}` : null,
+                notes ? `<br><b>📝 Note:</b> ${notes}` : null,
+            ]
+                .filter(Boolean)
+                .join("<br>");
+
             await fetch(
                 `${PIPEDRIVE_DOMAIN}/notes?api_token=${PIPEDRIVE_API_TOKEN}`,
                 {
@@ -76,16 +122,17 @@ export default async function handler(req, res) {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         deal_id: dealData.data.id,
-                        content: `Booking via Cal.com\nEvent: ${eventTitle}\nTime: ${startTime}\nAttendee: ${attendeeName} (${attendeeEmail})`,
+                        content: noteLines,
                     }),
                 }
             );
         }
 
-        console.log("Deal created:", dealData.data?.id);
         return res.status(200).json({
             success: true,
             deal_id: dealData.data?.id,
+            person_id: personId,
+            org_id: orgId || null,
         });
     } catch (error) {
         console.error("Webhook error:", error);
