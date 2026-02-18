@@ -4,6 +4,8 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: "Method not allowed" });
     }
 
+    console.log("Cal.com payload:", JSON.stringify(req.body, null, 2));
+
     const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN;
     const PIPELINE_ID = process.env.PIPEDRIVE_PIPELINE_ID;
     const STAGE_ID = process.env.PIPEDRIVE_STAGE_ID;
