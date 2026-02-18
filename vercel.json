@@ -1,0 +1,10 @@
+{
+    "version": 2,
+    "routes": [
+      {
+        "src": "/api/webhook/calcom",
+        "methods": ["POST"],
+        "dest": "/api/webhook/calcom.js"
+      }
+    ]
+  }
