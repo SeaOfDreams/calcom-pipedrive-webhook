@@ -128,6 +128,32 @@ export default async function handler(req, res) {
             );
         }
 
+        // 5. Create activity (call) with reminder
+        if (dealData.data?.id) {
+            const startDate = new Date(startTime);
+            const endTimeStr = payload.endTime || new Date(startDate.getTime() + 30 * 60000).toISOString();
+            const endDate = new Date(endTimeStr);
+
+            await fetch(
+                `${PIPEDRIVE_DOMAIN}/activities?api_token=${PIPEDRIVE_API_TOKEN}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        subject: `Call - ${attendeeName}`,
+                        type: "call",
+                        deal_id: dealData.data.id,
+                        person_id: personId,
+                        due_date: startDate.toISOString().split("T")[0],
+                        due_time: startDate.toTimeString().slice(0, 5),
+                        duration: endDate.toTimeString().slice(0, 5),
+                        note: `Prenotato via Cal.com${meetLink ? "\nMeet: " + meetLink : ""}`,
+                        done: 0,
+                    }),
+                }
+            );
+        }
+
         return res.status(200).json({
             success: true,
             deal_id: dealData.data?.id,
