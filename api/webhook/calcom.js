@@ -141,7 +141,7 @@ export default async function handler(req, res) {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         subject: `Call - ${attendeeName}`,
-                        type: "call",
+                        type: "task",
                         deal_id: dealData.data.id,
                         person_id: personId,
                         due_date: startDate.toISOString().split("T")[0],
